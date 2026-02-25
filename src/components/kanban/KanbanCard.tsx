@@ -66,9 +66,9 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
               {card.enrichmentStep || 'Iniciando...'}
             </span>
           </div>
-          {card.enrichmentLogs && card.enrichmentLogs.length > 0 && (
+          {(card.enrichmentLogs?.length ?? 0) > 0 && (
             <p className="text-xs font-mono text-purple-600 truncate pl-5">
-              {card.enrichmentLogs[card.enrichmentLogs.length - 1]?.detail}
+              {card.enrichmentLogs![card.enrichmentLogs!.length - 1]?.detail}
             </p>
           )}
         </div>
@@ -77,7 +77,7 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
         <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-green-50 border border-green-200 rounded-md">
           <CheckCircle size={12} className="text-green-600" />
           <span className="text-xs font-medium text-green-700">
-            {card.promptVersions[card.promptVersions.length - 1]?.analyzedFiles.length || 0} arquivos analisados
+            {card.promptVersions?.[card.promptVersions.length - 1]?.analyzedFiles?.length || 0} arquivos analisados
           </span>
         </div>
       )}

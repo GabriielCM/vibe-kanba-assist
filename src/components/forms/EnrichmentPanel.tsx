@@ -2,10 +2,10 @@ import { useRef, useEffect } from 'react'
 import { Sparkles, Loader2, FileCode, AlertCircle, CheckCircle, RotateCcw, FolderTree, Search, BookOpen, Cpu, AlertTriangle } from 'lucide-react'
 import { useFeaturesStore } from '../../store/features'
 import { useSettingsStore } from '../../store/settings'
-import type { FeatureCard, EnrichmentLogEntry } from '../../types'
+import type { EnrichmentLogEntry } from '../../types'
 
 interface EnrichmentPanelProps {
-  card: FeatureCard
+  card: { id: string }
 }
 
 const STEP_ICONS: Record<string, typeof Sparkles> = {
@@ -31,36 +31,48 @@ function LogLine({ entry }: { entry: EnrichmentLogEntry }) {
 
   return (
     <div className={`flex items-start gap-2 px-2 py-1 text-xs font-mono ${
-      isError ? 'text-red-600' : isWarn ? 'text-yellow-600' : isDone ? 'text-green-600' : 'text-text-secondary'
+      isError ? 'text-red-400' : isWarn ? 'text-yellow-400' : isDone ? 'text-green-400' : 'text-gray-300'
     }`}>
       <Icon size={12} className="mt-0.5 shrink-0" />
-      <span className="text-text-muted shrink-0">{time}</span>
+      <span className="text-gray-500 shrink-0">{time}</span>
       <span className="break-all">{entry.detail}</span>
     </div>
   )
 }
 
-export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
+export function EnrichmentPanel({ card: cardProp }: EnrichmentPanelProps) {
+  // Read card data DIRECTLY from the store via selector — this ensures we always
+  // get the latest state, not stale props from the parent component.
+  const card = useFeaturesStore((state) => state.cards.find((c) => c.id === cardProp.id))
   const { setEnrichmentStatus, clearEnrichmentLogs } = useFeaturesStore()
   const { apiKeys, selectedRepo } = useSettingsStore()
   const logEndRef = useRef<HTMLDivElement>(null)
 
   const hasApiKey = !!apiKeys.geminiApiKey
   const hasRepo = !!selectedRepo && !!apiKeys.githubClientId
-  const isRunning = card.enrichmentStatus === 'running'
-  const latestPrompt = card.promptVersions[card.promptVersions.length - 1]
 
-  const logs = card.enrichmentLogs || []
+  const logs = card?.enrichmentLogs || []
+  const enrichmentStatus = card?.enrichmentStatus || 'idle'
+  const enrichmentStep = card?.enrichmentStep || ''
+  const enrichmentError = card?.enrichmentError || null
+  const promptVersions = card?.promptVersions || []
+  const isRunning = enrichmentStatus === 'running'
+  const latestPrompt = promptVersions[promptVersions.length - 1]
 
-  // Auto-scroll logs to bottom
+  // Auto-scroll logs to bottom whenever new logs arrive
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (logs.length > 0) {
+      logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [logs.length])
 
   function retryEnrichment() {
+    if (!card) return
     clearEnrichmentLogs(card.id)
     setEnrichmentStatus(card.id, 'idle')
   }
+
+  if (!card) return null
 
   return (
     <div className="space-y-4">
@@ -73,7 +85,7 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
               : 'Conecte um repositório GitHub para análise real do código'}
           </p>
         </div>
-        {(card.enrichmentStatus === 'done' || card.enrichmentStatus === 'error') && (
+        {(enrichmentStatus === 'done' || enrichmentStatus === 'error') && (
           <button
             onClick={retryEnrichment}
             className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700"
@@ -95,7 +107,7 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
         </div>
       )}
 
-      {hasApiKey && !hasRepo && card.enrichmentStatus === 'idle' && (
+      {hasApiKey && !hasRepo && enrichmentStatus === 'idle' && (
         <div className="flex items-start gap-2 p-3 bg-orange-50 border border-orange-200 rounded-lg">
           <AlertTriangle size={16} className="text-orange-600 mt-0.5" />
           <div className="text-sm text-orange-800">
@@ -106,10 +118,10 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
       )}
 
       {/* Current step indicator */}
-      {isRunning && card.enrichmentStep && (
+      {isRunning && enrichmentStep && (
         <div className="flex items-center gap-2 px-3 py-2.5 bg-purple-50 border border-purple-200 rounded-lg">
           <Loader2 size={14} className="animate-spin text-purple-600" />
-          <span className="text-sm font-medium text-purple-700">{card.enrichmentStep}</span>
+          <span className="text-sm font-medium text-purple-700">{enrichmentStep}</span>
         </div>
       )}
 
@@ -125,14 +137,14 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
             <span className="text-xs font-mono">enrichment pipeline</span>
             <span className="text-xs font-mono ml-auto">{logs.length} eventos</span>
           </div>
-          <div className="bg-gray-950 p-2 max-h-[250px] overflow-y-auto">
+          <div className="bg-gray-950 p-2 max-h-[300px] overflow-y-auto">
             {logs.map((entry, i) => (
               <LogLine key={i} entry={entry} />
             ))}
             {isRunning && (
               <div className="flex items-center gap-2 px-2 py-1 text-xs font-mono text-purple-400">
                 <Loader2 size={12} className="animate-spin" />
-                <span className="animate-pulse">...</span>
+                <span className="animate-pulse">processando...</span>
               </div>
             )}
             <div ref={logEndRef} />
@@ -141,26 +153,26 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
       )}
 
       {/* Status badge */}
-      {card.enrichmentStatus === 'done' && (
+      {enrichmentStatus === 'done' && (
         <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
           <CheckCircle size={14} className="text-green-600" />
           <span className="text-xs font-medium text-green-700">
-            Enriquecimento completo — {latestPrompt?.analyzedFiles.length || 0} arquivos analisados, {card.promptVersions.length} versão(ões)
+            Enriquecimento completo — {latestPrompt?.analyzedFiles?.length || 0} arquivos analisados, {promptVersions.length} versão(ões)
           </span>
         </div>
       )}
 
-      {card.enrichmentStatus === 'error' && (
+      {enrichmentStatus === 'error' && (
         <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
           <AlertCircle size={14} className="text-red-600" />
-          <span className="text-xs font-medium text-red-700 flex-1">{card.enrichmentError || 'Erro no enriquecimento'}</span>
+          <span className="text-xs font-medium text-red-700 flex-1">{enrichmentError || 'Erro no enriquecimento'}</span>
           <button onClick={retryEnrichment} className="text-xs font-medium text-red-600 hover:text-red-700 underline">
             Tentar novamente
           </button>
         </div>
       )}
 
-      {card.enrichmentStatus === 'idle' && hasApiKey && (
+      {enrichmentStatus === 'idle' && hasApiKey && (
         <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border border-border rounded-lg">
           <Sparkles size={14} className="text-text-muted" />
           <span className="text-xs text-text-muted">
@@ -170,7 +182,7 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
       )}
 
       {/* Analyzed files */}
-      {latestPrompt && latestPrompt.analyzedFiles.length > 0 && (
+      {latestPrompt && latestPrompt.analyzedFiles?.length > 0 && (
         <div className="border border-border rounded-lg p-3">
           <h5 className="text-xs font-medium text-text-primary mb-2 flex items-center gap-1">
             <FileCode size={12} /> Arquivos Analisados ({latestPrompt.analyzedFiles.length})
@@ -186,7 +198,7 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
       )}
 
       {/* Detected patterns */}
-      {latestPrompt && latestPrompt.detectedPatterns.length > 0 && (
+      {latestPrompt && latestPrompt.detectedPatterns?.length > 0 && (
         <div className="border border-border rounded-lg p-3">
           <h5 className="text-xs font-medium text-text-primary mb-2 flex items-center gap-1">
             <BookOpen size={12} /> Padrões Detectados
@@ -202,14 +214,14 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
       )}
 
       {/* Prompt versions */}
-      {card.promptVersions.length > 0 && (
+      {promptVersions.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-xs text-text-muted">
             <FileCode size={14} />
-            {card.promptVersions.length} versão(ões) gerada(s)
+            {promptVersions.length} versão(ões) gerada(s)
           </div>
 
-          {card.promptVersions.map((pv) => (
+          {promptVersions.map((pv) => (
             <div key={pv.id} className="border border-border rounded-lg">
               <div className="flex items-center justify-between px-4 py-2 bg-surface-secondary rounded-t-lg border-b border-border">
                 <span className="text-xs font-medium text-text-primary">

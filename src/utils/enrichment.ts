@@ -6,12 +6,12 @@ interface GitHubTreeItem {
   size?: number
 }
 
-interface EnrichmentCallbacks {
+export interface EnrichmentCallbacks {
   onLog: (step: string, detail: string) => void
-  onStep: (step: string) => void
+  onStep: (stepDescription: string) => void
 }
 
-interface EnrichmentResult {
+export interface EnrichmentResult {
   prompt: string
   analyzedFiles: string[]
   detectedPatterns: string[]
@@ -26,14 +26,16 @@ const CODE_EXTENSIONS = [
 ]
 
 const CONFIG_FILES = [
-  'package.json', 'tsconfig.json', 'vite.config.ts', 'next.config.js',
-  'tailwind.config.js', 'tailwind.config.ts', '.eslintrc.js', '.eslintrc.json',
+  'package.json', 'tsconfig.json', 'vite.config.ts', 'vite.config.js',
+  'next.config.js', 'next.config.mjs', 'next.config.ts',
+  'tailwind.config.js', 'tailwind.config.ts',
+  '.eslintrc.js', '.eslintrc.json', 'eslint.config.js',
   'pyproject.toml', 'Cargo.toml', 'go.mod', 'Gemfile',
 ]
 
 const IGNORE_PATHS = [
   'node_modules', 'dist', 'build', '.git', '.next', '__pycache__',
-  'vendor', 'target', '.cache', 'coverage', '.turbo',
+  'vendor', 'target', '.cache', 'coverage', '.turbo', '.vercel',
 ]
 
 function shouldIgnore(path: string): boolean {
@@ -49,26 +51,19 @@ function isConfigFile(path: string): boolean {
   return CONFIG_FILES.includes(filename)
 }
 
-/**
- * Scores how relevant a file path is to the feature description.
- * Higher = more relevant.
- */
 function scoreRelevance(filePath: string, keywords: string[]): number {
   const lower = filePath.toLowerCase()
   let score = 0
   for (const kw of keywords) {
     if (lower.includes(kw.toLowerCase())) score += 3
   }
-  // Boost src files
   if (lower.startsWith('src/')) score += 1
-  // Boost component/page files
   if (lower.includes('component') || lower.includes('page') || lower.includes('view')) score += 1
   return score
 }
 
 function extractKeywords(card: FeatureCard): string[] {
   const text = `${card.title} ${card.description}`.toLowerCase()
-  // Extract meaningful words (3+ chars, no common words)
   const stopWords = new Set(['que', 'para', 'com', 'uma', 'por', 'não', 'dos', 'das', 'the', 'and', 'for', 'with', 'from', 'this', 'that', 'have', 'are', 'was', 'will', 'should', 'must', 'can'])
   return text
     .replace(/[^a-záàâãéèêíïóôõúç\w]/gi, ' ')
@@ -77,29 +72,41 @@ function extractKeywords(card: FeatureCard): string[] {
     .slice(0, 20)
 }
 
-async function fetchGitHubJson(url: string, token: string): Promise<unknown> {
+/**
+ * Fetch repo tree from GitHub Git Trees API.
+ */
+async function fetchRepoTree(repoFullName: string, branch: string, token: string): Promise<{ tree: GitHubTreeItem[]; truncated: boolean }> {
+  const url = `https://api.github.com/repos/${repoFullName}/git/trees/${branch}?recursive=1`
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3+json' },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github.v3+json',
+    },
   })
-  if (!res.ok) throw new Error(`GitHub API ${res.status}: ${url}`)
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(`GitHub Trees API ${res.status}: ${text.slice(0, 200)}`)
+  }
   return res.json()
 }
 
+/**
+ * Fetch raw file content using raw.githubusercontent.com — more reliable than the Contents API
+ * because it returns plain text directly without JSON wrapping or base64 encoding.
+ */
 async function fetchFileContent(repoFullName: string, path: string, branch: string, token: string): Promise<string> {
-  // Encode each path segment individually — encodeURIComponent on the full path turns "/" into "%2F" which 404s
-  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
-  const res = await fetch(
-    `https://api.github.com/repos/${repoFullName}/contents/${encodedPath}?ref=${branch}`,
-    {
-      headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3.raw' },
-    }
-  )
+  const url = `https://raw.githubusercontent.com/${repoFullName}/${branch}/${path}`
+  const res = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
   if (!res.ok) {
-    console.warn(`[enrichment] Failed to read ${path}: HTTP ${res.status}`)
-    return `[erro ao ler ${path} — HTTP ${res.status}]`
+    console.warn(`[enrichment] Failed to fetch ${path}: HTTP ${res.status} from ${url}`)
+    return ''
   }
   const text = await res.text()
-  // Limit to 200 lines to not blow up context
+  // Limit to 200 lines to not blow up Gemini context
   const lines = text.split('\n')
   if (lines.length > 200) {
     return lines.slice(0, 200).join('\n') + `\n\n... (truncado, ${lines.length} linhas total)`
@@ -107,6 +114,34 @@ async function fetchFileContent(repoFullName: string, path: string, branch: stri
   return text
 }
 
+/**
+ * Call Gemini API using x-goog-api-key header (not query string).
+ */
+async function callGemini(apiKey: string, prompt: string): Promise<string> {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-goog-api-key': apiKey,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+    }),
+  })
+
+  if (!res.ok) {
+    const errorText = await res.text()
+    throw new Error(`Gemini API ${res.status}: ${errorText.slice(0, 300)}`)
+  }
+
+  const data = await res.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem resposta do Gemini'
+}
+
+/**
+ * Main enrichment pipeline — fetches real code from GitHub repo and sends to Gemini.
+ */
 export async function runEnrichmentPipeline(
   card: FeatureCard,
   repoFullName: string,
@@ -123,18 +158,16 @@ export async function runEnrichmentPipeline(
   callbacks.onStep('Buscando estrutura do repositório...')
   callbacks.onLog('tree', `GET /repos/${repoFullName}/git/trees/${branch}?recursive=1`)
 
-  const treeData = await fetchGitHubJson(
-    `https://api.github.com/repos/${repoFullName}/git/trees/${branch}?recursive=1`,
-    githubToken,
-  ) as { tree: GitHubTreeItem[]; truncated: boolean }
+  const treeData = await fetchRepoTree(repoFullName, branch, githubToken)
 
-  const allFiles = treeData.tree
-    .filter((item) => item.type === 'blob' && !shouldIgnore(item.path))
-
+  const allFiles = treeData.tree.filter((item) => item.type === 'blob' && !shouldIgnore(item.path))
   const codeFiles = allFiles.filter((f) => isCodeFile(f.path))
   const configFiles = allFiles.filter((f) => isConfigFile(f.path))
 
   callbacks.onLog('tree', `${allFiles.length} arquivos encontrados, ${codeFiles.length} código, ${configFiles.length} config`)
+  if (treeData.truncated) {
+    callbacks.onLog('warn', 'Repo muito grande — árvore truncada pela API')
+  }
 
   // ===== STEP 2: Detect project structure =====
   callbacks.onStep('Analisando estrutura do projeto...')
@@ -151,17 +184,24 @@ export async function runEnrichmentPipeline(
   // ===== STEP 3: Read config files =====
   callbacks.onStep('Lendo arquivos de configuração...')
   const configContents: Record<string, string> = {}
+  let successCount = 0
 
   for (const cf of configFiles.slice(0, 5)) {
     callbacks.onLog('read', `Lendo ${cf.path}...`)
-    const content = await fetchFileContent(repoFullName, cf.path, branch, githubToken)
-    configContents[cf.path] = content
-    if (content.startsWith('[erro')) {
-      callbacks.onLog('warn', `Falha ao ler ${cf.path}`)
-    } else {
-      callbacks.onLog('read', `✓ ${cf.path} (${content.split('\n').length} linhas)`)
+    try {
+      const content = await fetchFileContent(repoFullName, cf.path, branch, githubToken)
+      if (content) {
+        configContents[cf.path] = content
+        callbacks.onLog('read', `✓ ${cf.path} (${content.split('\n').length} linhas)`)
+        successCount++
+      } else {
+        callbacks.onLog('warn', `✗ ${cf.path} — falha ao ler`)
+      }
+    } catch (e) {
+      callbacks.onLog('warn', `✗ ${cf.path} — ${e instanceof Error ? e.message : 'erro'}`)
     }
   }
+  callbacks.onLog('read', `${successCount}/${configFiles.slice(0, 5).length} configs lidos com sucesso`)
 
   // ===== STEP 4: Find relevant files =====
   callbacks.onStep('Identificando arquivos relevantes para a feature...')
@@ -172,7 +212,6 @@ export async function runEnrichmentPipeline(
   }))
   scored.sort((a, b) => b.score - a.score)
 
-  // Take top 10 most relevant + any config files
   const relevantFiles = scored.filter((f) => f.score > 0).slice(0, 10)
 
   // If we didn't find much by keyword, take some representative files
@@ -190,17 +229,24 @@ export async function runEnrichmentPipeline(
   // ===== STEP 5: Read relevant file contents =====
   callbacks.onStep('Lendo código dos arquivos relevantes...')
   const fileContents: Record<string, string> = {}
+  let codeSuccessCount = 0
 
   for (const rf of relevantFiles.slice(0, 8)) {
     callbacks.onLog('read', `Lendo ${rf.path}...`)
-    const content = await fetchFileContent(repoFullName, rf.path, branch, githubToken)
-    fileContents[rf.path] = content
-    if (content.startsWith('[erro')) {
-      callbacks.onLog('warn', `Falha ao ler ${rf.path}`)
-    } else {
-      callbacks.onLog('read', `✓ ${rf.path} (${content.split('\n').length} linhas)`)
+    try {
+      const content = await fetchFileContent(repoFullName, rf.path, branch, githubToken)
+      if (content) {
+        fileContents[rf.path] = content
+        callbacks.onLog('read', `✓ ${rf.path} (${content.split('\n').length} linhas)`)
+        codeSuccessCount++
+      } else {
+        callbacks.onLog('warn', `✗ ${rf.path} — falha ao ler`)
+      }
+    } catch (e) {
+      callbacks.onLog('warn', `✗ ${rf.path} — ${e instanceof Error ? e.message : 'erro'}`)
     }
   }
+  callbacks.onLog('read', `${codeSuccessCount}/${relevantFiles.slice(0, 8).length} arquivos lidos com sucesso`)
 
   // ===== STEP 6: Detect patterns =====
   callbacks.onStep('Detectando padrões e convenções...')
@@ -210,7 +256,7 @@ export async function runEnrichmentPipeline(
 
   if (allContent.includes('tailwind') || allContent.includes('className=')) detectedPatterns.push('Tailwind CSS')
   if (allContent.includes('useState') || allContent.includes('useEffect')) detectedPatterns.push('React Hooks')
-  if (allContent.includes('zustand') || allContent.includes('create(')) detectedPatterns.push('Zustand state management')
+  if (allContent.includes('zustand') || allContent.includes('create(')) detectedPatterns.push('Zustand')
   if (allContent.includes('express') || allContent.includes('app.get(')) detectedPatterns.push('Express.js')
   if (allContent.includes('next/') || allContent.includes('getServerSideProps')) detectedPatterns.push('Next.js')
   if (allContent.includes('vue') || allContent.includes('defineComponent')) detectedPatterns.push('Vue.js')
@@ -222,7 +268,7 @@ export async function runEnrichmentPipeline(
       const pkg = JSON.parse(configContents['package.json'])
       if (pkg.dependencies) {
         const deps = Object.keys(pkg.dependencies)
-        detectedPatterns.push(`Dependências: ${deps.slice(0, 10).join(', ')}`)
+        detectedPatterns.push(`Deps: ${deps.slice(0, 10).join(', ')}`)
       }
     } catch { /* ignore */ }
   }
@@ -231,10 +277,9 @@ export async function runEnrichmentPipeline(
 
   // ===== STEP 7: Build context and call Gemini =====
   callbacks.onStep('Gerando prompt com Gemini (com contexto real do repo)...')
-  callbacks.onLog('gemini', 'Montando contexto com código real do repositório...')
 
   const activeRules = generalRules.filter((r) => r.enabled)
-  const activeSelects = generalSelects.filter((s) => card.generalSelects.includes(s.id))
+  const activeSelects = generalSelects.filter((s) => (card.generalSelects || []).includes(s.id))
 
   const fileContextBlock = Object.entries(fileContents)
     .map(([path, content]) => `=== ${path} ===\n${content}`)
@@ -244,7 +289,7 @@ export async function runEnrichmentPipeline(
     .map(([path, content]) => `=== ${path} ===\n${content}`)
     .join('\n\n')
 
-  const prompt = `Você é um engenheiro de prompt especializado. Você DEVE gerar instruções baseadas no código REAL do repositório fornecido abaixo.
+  const geminiPrompt = `Você é um engenheiro de prompt especializado. Você DEVE gerar instruções baseadas no código REAL do repositório fornecido abaixo.
 
 REGRAS GERAIS (Constituição):
 ${activeRules.map((r) => `- ${r.title}: ${r.content}`).join('\n') || '(nenhuma regra configurada)'}
@@ -293,27 +338,11 @@ Com base no código REAL acima, gere:
 
 IMPORTANTE: Não invente nomes de arquivos. Use APENAS caminhos que existem no repositório ou derive novos caminhos seguindo o padrão existente.`
 
-  callbacks.onLog('gemini', `Enviando ${prompt.length} chars para Gemini (incluindo ${Object.keys(fileContents).length} arquivos de código)...`)
+  callbacks.onLog('gemini', `Enviando ${geminiPrompt.length} chars para Gemini (incluindo ${Object.keys(fileContents).length} arquivos de código)...`)
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
-    }
-  )
+  const resultText = await callGemini(geminiApiKey, geminiPrompt)
 
-  if (!response.ok) {
-    throw new Error(`Gemini API error: ${response.status}`)
-  }
-
-  const data = await response.json() as { candidates?: { content?: { parts?: { text?: string }[] } }[] }
-  const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem resposta do Gemini'
-
-  callbacks.onLog('gemini', 'Prompt gerado com sucesso.')
+  callbacks.onLog('gemini', 'Prompt gerado com sucesso!')
   callbacks.onStep('Concluído')
 
   const analyzedFiles = [

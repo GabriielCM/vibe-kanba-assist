@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { FeatureCard, ColumnId, PromptVersion, CodeOutput, TechnicalReview, PromptAccuracy, EnrichmentStatus } from '../types'
+import type { FeatureCard, ColumnId, PromptVersion, CodeOutput, TechnicalReview, PromptAccuracy, EnrichmentStatus, EnrichmentLogEntry } from '../types'
 import { generateId } from '../utils/id'
 
 interface FeaturesState {
@@ -16,6 +16,7 @@ interface FeaturesState {
   incrementIteration: (cardId: string) => void
   setEnrichmentStatus: (cardId: string, status: EnrichmentStatus, error?: string | null) => void
   addEnrichmentLog: (cardId: string, step: string, detail: string) => void
+  addEnrichmentLogs: (cardId: string, entries: EnrichmentLogEntry[]) => void
   setEnrichmentStep: (cardId: string, step: string) => void
   clearEnrichmentLogs: (cardId: string) => void
   getCardsByColumn: (columnId: ColumnId) => FeatureCard[]
@@ -160,7 +161,18 @@ export const useFeaturesStore = create<FeaturesState>()(
               ? {
                   ...card,
                   enrichmentLogs: [...(card.enrichmentLogs || []), { timestamp: new Date().toISOString(), step, detail }],
-                  enrichmentStep: step,
+                }
+              : card
+          ),
+        })),
+
+      addEnrichmentLogs: (cardId, entries) =>
+        set((state) => ({
+          cards: state.cards.map((card) =>
+            card.id === cardId
+              ? {
+                  ...card,
+                  enrichmentLogs: [...(card.enrichmentLogs || []), ...entries],
                 }
               : card
           ),
