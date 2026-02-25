@@ -1,11 +1,11 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { FeatureCard, ColumnId, PromptVersion, CodeOutput, TechnicalReview, PromptAccuracy } from '../types'
+import type { FeatureCard, ColumnId, PromptVersion, CodeOutput, TechnicalReview, PromptAccuracy, EnrichmentStatus } from '../types'
 import { generateId } from '../utils/id'
 
 interface FeaturesState {
   cards: FeatureCard[]
-  addCard: (card: Omit<FeatureCard, 'id' | 'createdAt' | 'updatedAt' | 'promptVersions' | 'codeOutputs' | 'technicalReview' | 'promptAccuracy' | 'iterationCount'>) => string
+  addCard: (card: Omit<FeatureCard, 'id' | 'createdAt' | 'updatedAt' | 'promptVersions' | 'codeOutputs' | 'technicalReview' | 'promptAccuracy' | 'iterationCount' | 'enrichmentStatus' | 'enrichmentError'>) => string
   updateCard: (id: string, updates: Partial<FeatureCard>) => void
   moveCard: (id: string, toColumn: ColumnId) => void
   deleteCard: (id: string) => void
@@ -14,6 +14,7 @@ interface FeaturesState {
   setTechnicalReview: (cardId: string, review: TechnicalReview) => void
   setPromptAccuracy: (cardId: string, accuracy: PromptAccuracy) => void
   incrementIteration: (cardId: string) => void
+  setEnrichmentStatus: (cardId: string, status: EnrichmentStatus, error?: string | null) => void
   getCardsByColumn: (columnId: ColumnId) => FeatureCard[]
 }
 
@@ -35,6 +36,8 @@ export const useFeaturesStore = create<FeaturesState>()(
               codeOutputs: [],
               technicalReview: null,
               promptAccuracy: null,
+              enrichmentStatus: 'idle',
+              enrichmentError: null,
               iterationCount: 0,
               createdAt: now,
               updatedAt: now,
@@ -132,6 +135,15 @@ export const useFeaturesStore = create<FeaturesState>()(
           cards: state.cards.map((card) =>
             card.id === cardId
               ? { ...card, iterationCount: card.iterationCount + 1, updatedAt: new Date().toISOString() }
+              : card
+          ),
+        })),
+
+      setEnrichmentStatus: (cardId, status, error = null) =>
+        set((state) => ({
+          cards: state.cards.map((card) =>
+            card.id === cardId
+              ? { ...card, enrichmentStatus: status, enrichmentError: error ?? null, updatedAt: new Date().toISOString() }
               : card
           ),
         })),

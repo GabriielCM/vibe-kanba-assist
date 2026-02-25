@@ -20,9 +20,23 @@ interface NewCardFormProps {
 export function NewCardForm({ onClose }: NewCardFormProps) {
   const { addCard } = useFeaturesStore()
   const { generalSelects } = usePromptsStore()
-  const { branches } = useSettingsStore()
+  const { branches, selectedRepo, apiKeys, setBranches } = useSettingsStore()
 
   const [title, setTitle] = useState('')
+  const [loadingBranches, setLoadingBranches] = useState(false)
+
+  // Auto-fetch branches when opening the form if repo is selected but branches are empty
+  useState(() => {
+    if (selectedRepo && apiKeys.githubClientId && branches.length === 0) {
+      setLoadingBranches(true)
+      fetch(`https://api.github.com/repos/${selectedRepo.full_name}/branches?per_page=100`, {
+        headers: { Authorization: `Bearer ${apiKeys.githubClientId}` },
+      })
+        .then((res) => res.ok ? res.json() : [])
+        .then((data) => setBranches(data))
+        .finally(() => setLoadingBranches(false))
+    }
+  })
   const [description, setDescription] = useState('')
   const [featureType, setFeatureType] = useState<FeatureType>('feature')
   const [branch, setBranch] = useState('')
@@ -118,25 +132,39 @@ export function NewCardForm({ onClose }: NewCardFormProps) {
 
             <div>
               <label className="block text-sm font-medium text-text-primary mb-1.5">Branch</label>
-              {branches.length > 0 ? (
-                <select
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-surface"
-                >
-                  <option value="">Selecionar branch...</option>
-                  {branches.map((b) => (
-                    <option key={b.name} value={b.name}>{b.name}</option>
-                  ))}
-                </select>
+              {loadingBranches ? (
+                <div className="w-full px-3 py-2 border border-border rounded-lg text-sm text-text-muted">
+                  Carregando branches...
+                </div>
+              ) : branches.length > 0 ? (
+                <>
+                  <select
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-surface"
+                  >
+                    <option value="">Selecionar branch...</option>
+                    {branches.map((b) => (
+                      <option key={b.name} value={b.name}>{b.name}</option>
+                    ))}
+                  </select>
+                  {selectedRepo && (
+                    <p className="text-xs text-text-muted mt-1">{selectedRepo.full_name}</p>
+                  )}
+                </>
               ) : (
-                <input
-                  type="text"
-                  value={branch}
-                  onChange={(e) => setBranch(e.target.value)}
-                  placeholder="main, develop, feature/..."
-                  className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
-                />
+                <>
+                  <input
+                    type="text"
+                    value={branch}
+                    onChange={(e) => setBranch(e.target.value)}
+                    placeholder="main, develop, feature/..."
+                    className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  />
+                  <p className="text-xs text-text-muted mt-1">
+                    Conecte um repositório GitHub nas configurações para selecionar branches automaticamente.
+                  </p>
+                </>
               )}
             </div>
           </div>

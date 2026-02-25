@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { X, Key, Github, Eye, EyeOff, RefreshCw, LogOut } from 'lucide-react'
 import { useSettingsStore } from '../../store/settings'
 
@@ -21,10 +21,32 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
   const [showGeminiKey, setShowGeminiKey] = useState(false)
   const [showGhSecret, setShowGhSecret] = useState(false)
-  const [ghToken, setGhToken] = useState('')
+  const [ghToken, setGhToken] = useState(apiKeys.githubClientId || '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'api-keys' | 'github'>('api-keys')
+
+  // Reload repos if user is connected but repos are empty (e.g. after page reload)
+  useEffect(() => {
+    if (githubUser && apiKeys.githubClientId && githubRepos.length === 0) {
+      reloadRepos()
+    }
+  }, [])
+
+  async function reloadRepos() {
+    if (!apiKeys.githubClientId) return
+    try {
+      const reposRes = await fetch('https://api.github.com/user/repos?per_page=100&sort=updated', {
+        headers: { Authorization: `Bearer ${apiKeys.githubClientId}` },
+      })
+      if (reposRes.ok) {
+        const reposData = await reposRes.json()
+        setGithubRepos(reposData)
+      }
+    } catch {
+      // silently fail
+    }
+  }
 
   async function connectGithub() {
     if (!ghToken.trim()) {
@@ -63,11 +85,12 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   }
 
   async function fetchBranches(repoFullName: string) {
-    if (!apiKeys.githubClientId) return
+    const token = apiKeys.githubClientId || ghToken
+    if (!token) return
 
     try {
-      const res = await fetch(`https://api.github.com/repos/${repoFullName}/branches`, {
-        headers: { Authorization: `Bearer ${apiKeys.githubClientId}` },
+      const res = await fetch(`https://api.github.com/repos/${repoFullName}/branches?per_page=100`, {
+        headers: { Authorization: `Bearer ${token}` },
       })
 
       if (res.ok) {
@@ -175,21 +198,34 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     </button>
                   </div>
 
-                  {githubRepos.length > 0 && (
-                    <div>
-                      <label className="block text-sm font-medium text-text-primary mb-1.5">
-                        Repositório
-                      </label>
-                      <select
-                        value={selectedRepo?.id || ''}
-                        onChange={(e) => selectRepo(Number(e.target.value))}
-                        className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-surface"
+                  <div>
+                    <label className="block text-sm font-medium text-text-primary mb-1.5">
+                      Repositório
+                    </label>
+                    <select
+                      value={selectedRepo?.id || ''}
+                      onChange={(e) => selectRepo(Number(e.target.value))}
+                      className="w-full px-3 py-2 border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary-500 bg-surface"
+                    >
+                      <option value="">Selecionar repositório...</option>
+                      {githubRepos.map((repo) => (
+                        <option key={repo.id} value={repo.id}>{repo.full_name}</option>
+                      ))}
+                    </select>
+                    {githubRepos.length === 0 && (
+                      <button
+                        onClick={reloadRepos}
+                        className="mt-2 flex items-center gap-1 text-xs text-primary-600 hover:text-primary-700 font-medium"
                       >
-                        <option value="">Selecionar repositório...</option>
-                        {githubRepos.map((repo) => (
-                          <option key={repo.id} value={repo.id}>{repo.full_name}</option>
-                        ))}
-                      </select>
+                        <RefreshCw size={12} /> Recarregar repositórios
+                      </button>
+                    )}
+                  </div>
+
+                  {selectedRepo && (
+                    <div className="p-3 bg-surface-secondary rounded-lg text-xs text-text-muted">
+                      <p><span className="font-medium text-text-secondary">Repo:</span> {selectedRepo.full_name}</p>
+                      <p><span className="font-medium text-text-secondary">Branch padrão:</span> {selectedRepo.default_branch}</p>
                     </div>
                   )}
                 </div>
@@ -216,7 +252,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                       </button>
                     </div>
                     <p className="text-xs text-text-muted mt-1">
-                      Crie um token em GitHub Settings → Developer Settings → Personal Access Tokens
+                      Crie um token em GitHub Settings &rarr; Developer Settings &rarr; Personal Access Tokens
                     </p>
                   </div>
 

@@ -62,6 +62,10 @@ export const useSettingsStore = create<SettingsState>()(
         activeBoard: state.activeBoard,
         apiKeys: state.apiKeys,
         sidebarOpen: state.sidebarOpen,
+        githubUser: state.githubUser,
+        githubRepos: state.githubRepos,
+        selectedRepo: state.selectedRepo,
+        branches: state.branches,
       }),
     }
   )

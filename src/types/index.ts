@@ -68,6 +68,8 @@ export interface PromptAccuracy {
   evaluatedAt: string
 }
 
+export type EnrichmentStatus = 'idle' | 'running' | 'done' | 'error'
+
 export interface FeatureCard {
   id: string
   columnId: ColumnId
@@ -82,6 +84,8 @@ export interface FeatureCard {
   codeOutputs: CodeOutput[]
   technicalReview: TechnicalReview | null
   promptAccuracy: PromptAccuracy | null
+  enrichmentStatus: EnrichmentStatus
+  enrichmentError: string | null
   iterationCount: number
   createdAt: string
   updatedAt: string

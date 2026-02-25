@@ -1,6 +1,6 @@
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { GitBranch, Tag, IterationCcw } from 'lucide-react'
+import { GitBranch, Tag, IterationCcw, Loader2, CheckCircle, AlertCircle } from 'lucide-react'
 import type { FeatureCard, FeatureType } from '../../types'
 
 const TYPE_COLORS: Record<FeatureType, string> = {
@@ -56,6 +56,26 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
       </div>
 
       <p className="text-xs text-text-muted line-clamp-2 mb-3">{card.description}</p>
+
+      {/* Enrichment status indicator */}
+      {card.columnId === 'enriquecimento' && card.enrichmentStatus === 'running' && (
+        <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-purple-50 border border-purple-200 rounded-md">
+          <Loader2 size={12} className="animate-spin text-purple-600" />
+          <span className="text-xs font-medium text-purple-700">Gemini gerando prompt...</span>
+        </div>
+      )}
+      {card.enrichmentStatus === 'done' && card.columnId === 'enriquecimento' && (
+        <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-green-50 border border-green-200 rounded-md">
+          <CheckCircle size={12} className="text-green-600" />
+          <span className="text-xs font-medium text-green-700">Prompt gerado</span>
+        </div>
+      )}
+      {card.enrichmentStatus === 'error' && (
+        <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-red-50 border border-red-200 rounded-md">
+          <AlertCircle size={12} className="text-red-600" />
+          <span className="text-xs font-medium text-red-700 truncate">{card.enrichmentError || 'Erro'}</span>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 flex-wrap">
         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${TYPE_COLORS[card.featureType]}`}>

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Sparkles, Loader2, FileCode, AlertCircle } from 'lucide-react'
+import { Sparkles, Loader2, FileCode, AlertCircle, CheckCircle, RotateCcw } from 'lucide-react'
 import { useFeaturesStore } from '../../store/features'
 import { usePromptsStore } from '../../store/prompts'
 import { useSettingsStore } from '../../store/settings'
@@ -10,7 +10,7 @@ interface EnrichmentPanelProps {
 }
 
 export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
-  const { addPromptVersion, incrementIteration } = useFeaturesStore()
+  const { addPromptVersion, incrementIteration, setEnrichmentStatus } = useFeaturesStore()
   const { generalRules, generalSelects } = usePromptsStore()
   const { apiKeys } = useSettingsStore()
 
@@ -18,6 +18,7 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
   const [error, setError] = useState<string | null>(null)
 
   const hasApiKey = !!apiKeys.geminiApiKey
+  const isRunning = card.enrichmentStatus === 'running' || loading
 
   async function generatePrompt() {
     if (!hasApiKey) {
@@ -27,6 +28,7 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
 
     setLoading(true)
     setError(null)
+    setEnrichmentStatus(card.id, 'running')
 
     try {
       const activeRules = generalRules.filter((r) => r.enabled)
@@ -35,10 +37,10 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
       const systemPrompt = `Você é um engenheiro de prompt especializado em gerar instruções de alta qualidade para code agents.
 
 REGRAS GERAIS (Constituição):
-${activeRules.map((r) => `- ${r.title}: ${r.content}`).join('\n')}
+${activeRules.map((r) => `- ${r.title}: ${r.content}`).join('\n') || '(nenhuma regra configurada)'}
 
 MODIFICADORES ATIVOS (General Selects):
-${activeSelects.map((s) => `- ${s.name}: ${s.description}`).join('\n')}
+${activeSelects.map((s) => `- ${s.name}: ${s.description}`).join('\n') || '(nenhum modificador ativo)'}
 
 TAREFA:
 Analise a feature request abaixo e gere um prompt arquiteturalmente alinhado para ser executado por um code agent.
@@ -55,13 +57,13 @@ Título: ${card.title}
 Descrição: ${card.description}
 Tipo: ${card.featureType}
 Branch: ${card.branch}
-Critérios de Aceite: ${card.acceptanceCriteria.join(', ')}
+Critérios de Aceite: ${card.acceptanceCriteria.join(', ') || '(nenhum definido)'}
 
-Retorne:
-1. O prompt otimizado
-2. Lista de arquivos que provavelmente serão afetados
-3. Padrões que devem ser seguidos
-4. Sugestões de melhoria estrutural (se houver)`
+Retorne em formato estruturado:
+1. **PROMPT OTIMIZADO**: O prompt final para o code agent
+2. **ARQUIVOS AFETADOS**: Lista de arquivos que provavelmente serão afetados
+3. **PADRÕES A SEGUIR**: Padrões que devem ser seguidos
+4. **SUGESTÕES DE MELHORIA**: Sugestões de melhoria estrutural (se houver)`
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKeys.geminiApiKey}`,
@@ -89,11 +91,19 @@ Retorne:
       })
 
       incrementIteration(card.id)
+      setEnrichmentStatus(card.id, 'done')
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao chamar Gemini API')
+      const msg = err instanceof Error ? err.message : 'Erro ao chamar Gemini API'
+      setError(msg)
+      setEnrichmentStatus(card.id, 'error', msg)
     } finally {
       setLoading(false)
     }
+  }
+
+  function retryEnrichment() {
+    setEnrichmentStatus(card.id, 'idle')
+    generatePrompt()
   }
 
   const latestPrompt = card.promptVersions[card.promptVersions.length - 1]
@@ -108,13 +118,58 @@ Retorne:
           </p>
         </div>
         <button
-          onClick={generatePrompt}
-          disabled={loading}
+          onClick={latestPrompt ? generatePrompt : retryEnrichment}
+          disabled={isRunning}
           className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
         >
-          {loading ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-          {loading ? 'Gerando...' : latestPrompt ? 'Regenerar Prompt' : 'Gerar Prompt'}
+          {isRunning ? <Loader2 size={16} className="animate-spin" /> : latestPrompt ? <RotateCcw size={16} /> : <Sparkles size={16} />}
+          {isRunning ? 'Gerando...' : latestPrompt ? 'Regenerar Prompt' : 'Gerar Prompt'}
         </button>
+      </div>
+
+      {/* Status bar */}
+      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+        card.enrichmentStatus === 'running' ? 'bg-purple-50 border-purple-200' :
+        card.enrichmentStatus === 'done' ? 'bg-green-50 border-green-200' :
+        card.enrichmentStatus === 'error' ? 'bg-red-50 border-red-200' :
+        'bg-surface-secondary border-border'
+      }`}>
+        {card.enrichmentStatus === 'running' && (
+          <>
+            <Loader2 size={14} className="animate-spin text-purple-600" />
+            <span className="text-xs font-medium text-purple-700">Gemini processando...</span>
+            <div className="flex-1 h-1.5 bg-purple-100 rounded-full overflow-hidden ml-2">
+              <div className="h-full bg-purple-500 rounded-full animate-pulse" style={{ width: '60%' }} />
+            </div>
+          </>
+        )}
+        {card.enrichmentStatus === 'done' && (
+          <>
+            <CheckCircle size={14} className="text-green-600" />
+            <span className="text-xs font-medium text-green-700">
+              Prompt gerado com sucesso ({card.promptVersions.length} versão(ões))
+            </span>
+          </>
+        )}
+        {card.enrichmentStatus === 'error' && (
+          <>
+            <AlertCircle size={14} className="text-red-600" />
+            <span className="text-xs font-medium text-red-700 flex-1">{card.enrichmentError || 'Erro no enriquecimento'}</span>
+            <button onClick={retryEnrichment} className="text-xs font-medium text-red-600 hover:text-red-700 underline">
+              Tentar novamente
+            </button>
+          </>
+        )}
+        {card.enrichmentStatus === 'idle' && (
+          <>
+            <Sparkles size={14} className="text-text-muted" />
+            <span className="text-xs text-text-muted">
+              {hasApiKey
+                ? 'Mova o card para esta coluna para disparar automaticamente, ou clique em "Gerar Prompt".'
+                : 'Configure a API Key do Gemini nas configurações.'}
+            </span>
+          </>
+        )}
       </div>
 
       {!hasApiKey && (
@@ -122,12 +177,12 @@ Retorne:
           <AlertCircle size={16} className="text-yellow-600 mt-0.5" />
           <div className="text-sm text-yellow-800">
             <p className="font-medium">API Key não configurada</p>
-            <p className="text-xs mt-0.5">Configure a API Key do Gemini nas configurações para usar o enriquecimento.</p>
+            <p className="text-xs mt-0.5">Configure a API Key do Gemini nas configurações para usar o enriquecimento automático.</p>
           </div>
         </div>
       )}
 
-      {error && (
+      {error && card.enrichmentStatus !== 'error' && (
         <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
           <AlertCircle size={16} className="text-red-600 mt-0.5" />
           <p className="text-sm text-red-800">{error}</p>

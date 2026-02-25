@@ -7,12 +7,16 @@ import { PromptLibrary } from './pages/PromptLibrary'
 import { SystemImprovement } from './pages/SystemImprovement'
 import { SettingsModal } from './components/settings/SettingsModal'
 import { MetricsPanel } from './components/metrics/MetricsPanel'
+import { useAutoEnrichment } from './hooks/useAutoEnrichment'
 
 export default function App() {
   const { activeBoard } = useSettingsStore()
   const [showNewCard, setShowNewCard] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showMetrics] = useState(false)
+
+  // Auto-trigger Gemini enrichment when cards enter "enriquecimento" column
+  useAutoEnrichment()
 
   return (
     <div className="h-screen flex overflow-hidden">
