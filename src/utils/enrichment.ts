@@ -91,14 +91,22 @@ async function fetchRepoTree(repoFullName: string, branch: string, token: string
 }
 
 /**
- * Fetch raw file content using raw.githubusercontent.com — more reliable than the Contents API
- * because it returns plain text directly without JSON wrapping or base64 encoding.
+ * Fetch raw file content using GitHub Contents API.
+ *
+ * IMPORTANT: raw.githubusercontent.com does NOT support CORS when Authorization header
+ * is sent (browser does OPTIONS preflight → gets 403). api.github.com DOES support CORS.
+ *
+ * Uses Accept: application/vnd.github.raw+json to get plain text directly (no base64).
+ * Path segments are encoded individually — encoding the full path turns "/" into "%2F" which 404s.
+ * Does NOT send X-GitHub-Api-Version header — it's not in CORS allowed headers and causes preflight failure.
  */
 async function fetchFileContent(repoFullName: string, path: string, branch: string, token: string): Promise<string> {
-  const url = `https://raw.githubusercontent.com/${repoFullName}/${branch}/${path}`
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
+  const url = `https://api.github.com/repos/${repoFullName}/contents/${encodedPath}?ref=${branch}`
   const res = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
+      Accept: 'application/vnd.github.raw+json',
     },
   })
   if (!res.ok) {
