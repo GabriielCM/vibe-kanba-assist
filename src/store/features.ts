@@ -5,7 +5,7 @@ import { generateId } from '../utils/id'
 
 interface FeaturesState {
   cards: FeatureCard[]
-  addCard: (card: Omit<FeatureCard, 'id' | 'createdAt' | 'updatedAt' | 'promptVersions' | 'codeOutputs' | 'technicalReview' | 'promptAccuracy' | 'iterationCount' | 'enrichmentStatus' | 'enrichmentError'>) => string
+  addCard: (card: Omit<FeatureCard, 'id' | 'createdAt' | 'updatedAt' | 'promptVersions' | 'codeOutputs' | 'technicalReview' | 'promptAccuracy' | 'iterationCount' | 'enrichmentStatus' | 'enrichmentError' | 'enrichmentLogs' | 'enrichmentStep'>) => string
   updateCard: (id: string, updates: Partial<FeatureCard>) => void
   moveCard: (id: string, toColumn: ColumnId) => void
   deleteCard: (id: string) => void
@@ -15,6 +15,9 @@ interface FeaturesState {
   setPromptAccuracy: (cardId: string, accuracy: PromptAccuracy) => void
   incrementIteration: (cardId: string) => void
   setEnrichmentStatus: (cardId: string, status: EnrichmentStatus, error?: string | null) => void
+  addEnrichmentLog: (cardId: string, step: string, detail: string) => void
+  setEnrichmentStep: (cardId: string, step: string) => void
+  clearEnrichmentLogs: (cardId: string) => void
   getCardsByColumn: (columnId: ColumnId) => FeatureCard[]
 }
 
@@ -38,6 +41,8 @@ export const useFeaturesStore = create<FeaturesState>()(
               promptAccuracy: null,
               enrichmentStatus: 'idle',
               enrichmentError: null,
+              enrichmentLogs: [],
+              enrichmentStep: '',
               iterationCount: 0,
               createdAt: now,
               updatedAt: now,
@@ -145,6 +150,33 @@ export const useFeaturesStore = create<FeaturesState>()(
             card.id === cardId
               ? { ...card, enrichmentStatus: status, enrichmentError: error ?? null, updatedAt: new Date().toISOString() }
               : card
+          ),
+        })),
+
+      addEnrichmentLog: (cardId, step, detail) =>
+        set((state) => ({
+          cards: state.cards.map((card) =>
+            card.id === cardId
+              ? {
+                  ...card,
+                  enrichmentLogs: [...card.enrichmentLogs, { timestamp: new Date().toISOString(), step, detail }],
+                  enrichmentStep: step,
+                }
+              : card
+          ),
+        })),
+
+      setEnrichmentStep: (cardId, step) =>
+        set((state) => ({
+          cards: state.cards.map((card) =>
+            card.id === cardId ? { ...card, enrichmentStep: step } : card
+          ),
+        })),
+
+      clearEnrichmentLogs: (cardId) =>
+        set((state) => ({
+          cards: state.cards.map((card) =>
+            card.id === cardId ? { ...card, enrichmentLogs: [], enrichmentStep: '' } : card
           ),
         })),
 

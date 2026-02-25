@@ -1,112 +1,64 @@
-import { useState } from 'react'
-import { Sparkles, Loader2, FileCode, AlertCircle, CheckCircle, RotateCcw } from 'lucide-react'
+import { useRef, useEffect } from 'react'
+import { Sparkles, Loader2, FileCode, AlertCircle, CheckCircle, RotateCcw, FolderTree, Search, BookOpen, Cpu, AlertTriangle } from 'lucide-react'
 import { useFeaturesStore } from '../../store/features'
-import { usePromptsStore } from '../../store/prompts'
 import { useSettingsStore } from '../../store/settings'
-import type { FeatureCard } from '../../types'
+import type { FeatureCard, EnrichmentLogEntry } from '../../types'
 
 interface EnrichmentPanelProps {
   card: FeatureCard
 }
 
-export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
-  const { addPromptVersion, incrementIteration, setEnrichmentStatus } = useFeaturesStore()
-  const { generalRules, generalSelects } = usePromptsStore()
-  const { apiKeys } = useSettingsStore()
+const STEP_ICONS: Record<string, typeof Sparkles> = {
+  start: Sparkles,
+  tree: FolderTree,
+  structure: FolderTree,
+  read: FileCode,
+  relevance: Search,
+  patterns: BookOpen,
+  gemini: Cpu,
+  step: Loader2,
+  done: CheckCircle,
+  error: AlertCircle,
+  warn: AlertTriangle,
+}
 
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+function LogLine({ entry }: { entry: EnrichmentLogEntry }) {
+  const Icon = STEP_ICONS[entry.step] || FileCode
+  const isError = entry.step === 'error'
+  const isWarn = entry.step === 'warn'
+  const isDone = entry.step === 'done'
+  const time = new Date(entry.timestamp).toLocaleTimeString('pt-BR')
+
+  return (
+    <div className={`flex items-start gap-2 px-2 py-1 text-xs font-mono ${
+      isError ? 'text-red-600' : isWarn ? 'text-yellow-600' : isDone ? 'text-green-600' : 'text-text-secondary'
+    }`}>
+      <Icon size={12} className="mt-0.5 shrink-0" />
+      <span className="text-text-muted shrink-0">{time}</span>
+      <span className="break-all">{entry.detail}</span>
+    </div>
+  )
+}
+
+export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
+  const { setEnrichmentStatus, clearEnrichmentLogs } = useFeaturesStore()
+  const { apiKeys, selectedRepo } = useSettingsStore()
+  const logEndRef = useRef<HTMLDivElement>(null)
 
   const hasApiKey = !!apiKeys.geminiApiKey
-  const isRunning = card.enrichmentStatus === 'running' || loading
+  const hasRepo = !!selectedRepo && !!apiKeys.githubClientId
+  const isRunning = card.enrichmentStatus === 'running'
+  const latestPrompt = card.promptVersions[card.promptVersions.length - 1]
 
-  async function generatePrompt() {
-    if (!hasApiKey) {
-      setError('Configure a API Key do Gemini nas configurações.')
-      return
-    }
-
-    setLoading(true)
-    setError(null)
-    setEnrichmentStatus(card.id, 'running')
-
-    try {
-      const activeRules = generalRules.filter((r) => r.enabled)
-      const activeSelects = generalSelects.filter((s) => card.generalSelects.includes(s.id))
-
-      const systemPrompt = `Você é um engenheiro de prompt especializado em gerar instruções de alta qualidade para code agents.
-
-REGRAS GERAIS (Constituição):
-${activeRules.map((r) => `- ${r.title}: ${r.content}`).join('\n') || '(nenhuma regra configurada)'}
-
-MODIFICADORES ATIVOS (General Selects):
-${activeSelects.map((s) => `- ${s.name}: ${s.description}`).join('\n') || '(nenhum modificador ativo)'}
-
-TAREFA:
-Analise a feature request abaixo e gere um prompt arquiteturalmente alinhado para ser executado por um code agent.
-
-O prompt deve:
-1. Ser específico e não ambíguo
-2. Incluir critérios de aceite
-3. Respeitar padrões existentes
-4. Não pedir coisa demais em uma única execução
-5. Ser seguro (sem vulnerabilidades)
-
-FEATURE REQUEST:
-Título: ${card.title}
-Descrição: ${card.description}
-Tipo: ${card.featureType}
-Branch: ${card.branch}
-Critérios de Aceite: ${card.acceptanceCriteria.join(', ') || '(nenhum definido)'}
-
-Retorne em formato estruturado:
-1. **PROMPT OTIMIZADO**: O prompt final para o code agent
-2. **ARQUIVOS AFETADOS**: Lista de arquivos que provavelmente serão afetados
-3. **PADRÕES A SEGUIR**: Padrões que devem ser seguidos
-4. **SUGESTÕES DE MELHORIA**: Sugestões de melhoria estrutural (se houver)`
-
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKeys.geminiApiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: systemPrompt }] }],
-          }),
-        }
-      )
-
-      if (!response.ok) {
-        throw new Error(`Gemini API error: ${response.status}`)
-      }
-
-      const data = await response.json()
-      const text = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sem resposta do Gemini'
-
-      addPromptVersion(card.id, {
-        content: text,
-        analyzedFiles: [],
-        detectedPatterns: [],
-        structuralSuggestions: [],
-      })
-
-      incrementIteration(card.id)
-      setEnrichmentStatus(card.id, 'done')
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Erro ao chamar Gemini API'
-      setError(msg)
-      setEnrichmentStatus(card.id, 'error', msg)
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Auto-scroll logs to bottom
+  useEffect(() => {
+    logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [card.enrichmentLogs.length])
 
   function retryEnrichment() {
+    clearEnrichmentLogs(card.id)
     setEnrichmentStatus(card.id, 'idle')
-    generatePrompt()
   }
-
-  const latestPrompt = card.promptVersions[card.promptVersions.length - 1]
 
   return (
     <div className="space-y-4">
@@ -114,81 +66,140 @@ Retorne em formato estruturado:
         <div>
           <h4 className="text-sm font-medium text-text-primary">Enriquecimento de Contexto</h4>
           <p className="text-xs text-text-muted mt-0.5">
-            Gemini analisa o input e gera um prompt de alta qualidade
+            {hasRepo
+              ? `Analisa o código real de ${selectedRepo!.full_name} e gera prompt contextualizado`
+              : 'Conecte um repositório GitHub para análise real do código'}
           </p>
         </div>
-        <button
-          onClick={latestPrompt ? generatePrompt : retryEnrichment}
-          disabled={isRunning}
-          className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50"
-        >
-          {isRunning ? <Loader2 size={16} className="animate-spin" /> : latestPrompt ? <RotateCcw size={16} /> : <Sparkles size={16} />}
-          {isRunning ? 'Gerando...' : latestPrompt ? 'Regenerar Prompt' : 'Gerar Prompt'}
-        </button>
-      </div>
-
-      {/* Status bar */}
-      <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
-        card.enrichmentStatus === 'running' ? 'bg-purple-50 border-purple-200' :
-        card.enrichmentStatus === 'done' ? 'bg-green-50 border-green-200' :
-        card.enrichmentStatus === 'error' ? 'bg-red-50 border-red-200' :
-        'bg-surface-secondary border-border'
-      }`}>
-        {card.enrichmentStatus === 'running' && (
-          <>
-            <Loader2 size={14} className="animate-spin text-purple-600" />
-            <span className="text-xs font-medium text-purple-700">Gemini processando...</span>
-            <div className="flex-1 h-1.5 bg-purple-100 rounded-full overflow-hidden ml-2">
-              <div className="h-full bg-purple-500 rounded-full animate-pulse" style={{ width: '60%' }} />
-            </div>
-          </>
-        )}
-        {card.enrichmentStatus === 'done' && (
-          <>
-            <CheckCircle size={14} className="text-green-600" />
-            <span className="text-xs font-medium text-green-700">
-              Prompt gerado com sucesso ({card.promptVersions.length} versão(ões))
-            </span>
-          </>
-        )}
-        {card.enrichmentStatus === 'error' && (
-          <>
-            <AlertCircle size={14} className="text-red-600" />
-            <span className="text-xs font-medium text-red-700 flex-1">{card.enrichmentError || 'Erro no enriquecimento'}</span>
-            <button onClick={retryEnrichment} className="text-xs font-medium text-red-600 hover:text-red-700 underline">
-              Tentar novamente
-            </button>
-          </>
-        )}
-        {card.enrichmentStatus === 'idle' && (
-          <>
-            <Sparkles size={14} className="text-text-muted" />
-            <span className="text-xs text-text-muted">
-              {hasApiKey
-                ? 'Mova o card para esta coluna para disparar automaticamente, ou clique em "Gerar Prompt".'
-                : 'Configure a API Key do Gemini nas configurações.'}
-            </span>
-          </>
+        {(card.enrichmentStatus === 'done' || card.enrichmentStatus === 'error') && (
+          <button
+            onClick={retryEnrichment}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+          >
+            <RotateCcw size={16} />
+            Regenerar
+          </button>
         )}
       </div>
 
+      {/* Warnings */}
       {!hasApiKey && (
         <div className="flex items-start gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
           <AlertCircle size={16} className="text-yellow-600 mt-0.5" />
           <div className="text-sm text-yellow-800">
-            <p className="font-medium">API Key não configurada</p>
-            <p className="text-xs mt-0.5">Configure a API Key do Gemini nas configurações para usar o enriquecimento automático.</p>
+            <p className="font-medium">API Key do Gemini não configurada</p>
+            <p className="text-xs mt-0.5">Configure nas configurações para usar o enriquecimento.</p>
           </div>
         </div>
       )}
 
-      {error && card.enrichmentStatus !== 'error' && (
-        <div className="flex items-start gap-2 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <AlertCircle size={16} className="text-red-600 mt-0.5" />
-          <p className="text-sm text-red-800">{error}</p>
+      {hasApiKey && !hasRepo && card.enrichmentStatus === 'idle' && (
+        <div className="flex items-start gap-2 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+          <AlertTriangle size={16} className="text-orange-600 mt-0.5" />
+          <div className="text-sm text-orange-800">
+            <p className="font-medium">Repositório GitHub não conectado</p>
+            <p className="text-xs mt-0.5">O prompt será gerado SEM análise de código. Conecte um repo nas configurações para enriquecimento real.</p>
+          </div>
         </div>
       )}
 
+      {/* Current step indicator */}
+      {isRunning && card.enrichmentStep && (
+        <div className="flex items-center gap-2 px-3 py-2.5 bg-purple-50 border border-purple-200 rounded-lg">
+          <Loader2 size={14} className="animate-spin text-purple-600" />
+          <span className="text-sm font-medium text-purple-700">{card.enrichmentStep}</span>
+        </div>
+      )}
+
+      {/* Real-time log terminal */}
+      {card.enrichmentLogs.length > 0 && (
+        <div className="border border-border rounded-lg overflow-hidden">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-gray-400">
+            <div className="flex gap-1">
+              <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
+              <div className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
+              <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
+            </div>
+            <span className="text-xs font-mono">enrichment pipeline</span>
+            <span className="text-xs font-mono ml-auto">{card.enrichmentLogs.length} eventos</span>
+          </div>
+          <div className="bg-gray-950 p-2 max-h-[250px] overflow-y-auto">
+            {card.enrichmentLogs.map((entry, i) => (
+              <LogLine key={i} entry={entry} />
+            ))}
+            {isRunning && (
+              <div className="flex items-center gap-2 px-2 py-1 text-xs font-mono text-purple-400">
+                <Loader2 size={12} className="animate-spin" />
+                <span className="animate-pulse">...</span>
+              </div>
+            )}
+            <div ref={logEndRef} />
+          </div>
+        </div>
+      )}
+
+      {/* Status badge */}
+      {card.enrichmentStatus === 'done' && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-green-50 border border-green-200 rounded-lg">
+          <CheckCircle size={14} className="text-green-600" />
+          <span className="text-xs font-medium text-green-700">
+            Enriquecimento completo — {latestPrompt?.analyzedFiles.length || 0} arquivos analisados, {card.promptVersions.length} versão(ões)
+          </span>
+        </div>
+      )}
+
+      {card.enrichmentStatus === 'error' && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-red-50 border border-red-200 rounded-lg">
+          <AlertCircle size={14} className="text-red-600" />
+          <span className="text-xs font-medium text-red-700 flex-1">{card.enrichmentError || 'Erro no enriquecimento'}</span>
+          <button onClick={retryEnrichment} className="text-xs font-medium text-red-600 hover:text-red-700 underline">
+            Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {card.enrichmentStatus === 'idle' && hasApiKey && (
+        <div className="flex items-center gap-2 px-3 py-2 bg-surface-secondary border border-border rounded-lg">
+          <Sparkles size={14} className="text-text-muted" />
+          <span className="text-xs text-text-muted">
+            Mova o card para esta coluna para disparar automaticamente.
+          </span>
+        </div>
+      )}
+
+      {/* Analyzed files */}
+      {latestPrompt && latestPrompt.analyzedFiles.length > 0 && (
+        <div className="border border-border rounded-lg p-3">
+          <h5 className="text-xs font-medium text-text-primary mb-2 flex items-center gap-1">
+            <FileCode size={12} /> Arquivos Analisados ({latestPrompt.analyzedFiles.length})
+          </h5>
+          <div className="flex flex-wrap gap-1">
+            {latestPrompt.analyzedFiles.map((f) => (
+              <span key={f} className="text-xs font-mono px-2 py-0.5 bg-surface-secondary rounded text-text-secondary">
+                {f}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Detected patterns */}
+      {latestPrompt && latestPrompt.detectedPatterns.length > 0 && (
+        <div className="border border-border rounded-lg p-3">
+          <h5 className="text-xs font-medium text-text-primary mb-2 flex items-center gap-1">
+            <BookOpen size={12} /> Padrões Detectados
+          </h5>
+          <div className="flex flex-wrap gap-1">
+            {latestPrompt.detectedPatterns.map((p) => (
+              <span key={p} className="text-xs px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full font-medium">
+                {p}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Prompt versions */}
       {card.promptVersions.length > 0 && (
         <div className="space-y-3">
           <div className="flex items-center gap-2 text-xs text-text-muted">

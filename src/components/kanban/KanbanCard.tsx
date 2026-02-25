@@ -58,16 +58,27 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
       <p className="text-xs text-text-muted line-clamp-2 mb-3">{card.description}</p>
 
       {/* Enrichment status indicator */}
-      {card.columnId === 'enriquecimento' && card.enrichmentStatus === 'running' && (
-        <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-purple-50 border border-purple-200 rounded-md">
-          <Loader2 size={12} className="animate-spin text-purple-600" />
-          <span className="text-xs font-medium text-purple-700">Gemini gerando prompt...</span>
+      {card.enrichmentStatus === 'running' && (
+        <div className="mb-2 px-2 py-1.5 bg-purple-50 border border-purple-200 rounded-md space-y-1">
+          <div className="flex items-center gap-2">
+            <Loader2 size={12} className="animate-spin text-purple-600" />
+            <span className="text-xs font-medium text-purple-700 truncate">
+              {card.enrichmentStep || 'Iniciando...'}
+            </span>
+          </div>
+          {card.enrichmentLogs.length > 0 && (
+            <p className="text-xs font-mono text-purple-600 truncate pl-5">
+              {card.enrichmentLogs[card.enrichmentLogs.length - 1]?.detail}
+            </p>
+          )}
         </div>
       )}
       {card.enrichmentStatus === 'done' && card.columnId === 'enriquecimento' && (
         <div className="flex items-center gap-2 mb-2 px-2 py-1.5 bg-green-50 border border-green-200 rounded-md">
           <CheckCircle size={12} className="text-green-600" />
-          <span className="text-xs font-medium text-green-700">Prompt gerado</span>
+          <span className="text-xs font-medium text-green-700">
+            {card.promptVersions[card.promptVersions.length - 1]?.analyzedFiles.length || 0} arquivos analisados
+          </span>
         </div>
       )}
       {card.enrichmentStatus === 'error' && (

@@ -70,6 +70,12 @@ export interface PromptAccuracy {
 
 export type EnrichmentStatus = 'idle' | 'running' | 'done' | 'error'
 
+export interface EnrichmentLogEntry {
+  timestamp: string
+  step: string
+  detail: string
+}
+
 export interface FeatureCard {
   id: string
   columnId: ColumnId
@@ -86,6 +92,8 @@ export interface FeatureCard {
   promptAccuracy: PromptAccuracy | null
   enrichmentStatus: EnrichmentStatus
   enrichmentError: string | null
+  enrichmentLogs: EnrichmentLogEntry[]
+  enrichmentStep: string
   iterationCount: number
   createdAt: string
   updatedAt: string
