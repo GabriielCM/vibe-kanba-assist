@@ -66,9 +66,10 @@ export function EnrichmentPanel({ card: cardProp }: EnrichmentPanelProps) {
     }
   }, [logs.length])
 
-  function retryEnrichment() {
+  function triggerEnrichment() {
     if (!card) return
     clearEnrichmentLogs(card.id)
+    // Setting status to 'idle' triggers the useAutoEnrichment hook to re-process
     setEnrichmentStatus(card.id, 'idle')
   }
 
@@ -85,15 +86,26 @@ export function EnrichmentPanel({ card: cardProp }: EnrichmentPanelProps) {
               : 'Conecte um repositório GitHub para análise real do código'}
           </p>
         </div>
-        {(enrichmentStatus === 'done' || enrichmentStatus === 'error') && (
-          <button
-            onClick={retryEnrichment}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700"
-          >
-            <RotateCcw size={16} />
-            Regenerar
-          </button>
-        )}
+        <div className="flex gap-2">
+          {(enrichmentStatus === 'done' || enrichmentStatus === 'error') && (
+            <button
+              onClick={triggerEnrichment}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+            >
+              <RotateCcw size={16} />
+              Regenerar
+            </button>
+          )}
+          {enrichmentStatus === 'idle' && hasApiKey && (
+            <button
+              onClick={triggerEnrichment}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+            >
+              <Sparkles size={16} />
+              Iniciar Enriquecimento
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Warnings */}
