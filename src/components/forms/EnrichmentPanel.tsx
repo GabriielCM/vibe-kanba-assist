@@ -50,10 +50,12 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
   const isRunning = card.enrichmentStatus === 'running'
   const latestPrompt = card.promptVersions[card.promptVersions.length - 1]
 
+  const logs = card.enrichmentLogs || []
+
   // Auto-scroll logs to bottom
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [card.enrichmentLogs.length])
+  }, [logs.length])
 
   function retryEnrichment() {
     clearEnrichmentLogs(card.id)
@@ -112,7 +114,7 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
       )}
 
       {/* Real-time log terminal */}
-      {card.enrichmentLogs.length > 0 && (
+      {logs.length > 0 && (
         <div className="border border-border rounded-lg overflow-hidden">
           <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-gray-400">
             <div className="flex gap-1">
@@ -121,10 +123,10 @@ export function EnrichmentPanel({ card }: EnrichmentPanelProps) {
               <div className="w-2.5 h-2.5 rounded-full bg-green-500" />
             </div>
             <span className="text-xs font-mono">enrichment pipeline</span>
-            <span className="text-xs font-mono ml-auto">{card.enrichmentLogs.length} eventos</span>
+            <span className="text-xs font-mono ml-auto">{logs.length} eventos</span>
           </div>
           <div className="bg-gray-950 p-2 max-h-[250px] overflow-y-auto">
-            {card.enrichmentLogs.map((entry, i) => (
+            {logs.map((entry, i) => (
               <LogLine key={i} entry={entry} />
             ))}
             {isRunning && (

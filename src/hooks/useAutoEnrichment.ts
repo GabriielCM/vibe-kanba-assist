@@ -18,8 +18,8 @@ export function useAutoEnrichment() {
     const cardsToEnrich = cards.filter(
       (c) =>
         c.columnId === 'enriquecimento' &&
-        c.enrichmentStatus === 'idle' &&
-        c.promptVersions.length === 0 &&
+        (!c.enrichmentStatus || c.enrichmentStatus === 'idle') &&
+        (!c.promptVersions || c.promptVersions.length === 0) &&
         !processingRef.current.has(c.id)
     )
 
@@ -70,7 +70,7 @@ export function useAutoEnrichment() {
         addEnrichmentLog(card.id, 'step', 'Gerando prompt com Gemini (sem contexto de repo)...')
 
         const activeRules = generalRules.filter((r) => r.enabled)
-        const activeSelects = generalSelects.filter((s) => card.generalSelects.includes(s.id))
+        const activeSelects = generalSelects.filter((s) => (card.generalSelects || []).includes(s.id))
 
         const systemPrompt = `Você é um engenheiro de prompt especializado em gerar instruções de alta qualidade para code agents.
 

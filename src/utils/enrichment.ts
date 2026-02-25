@@ -86,13 +86,18 @@ async function fetchGitHubJson(url: string, token: string): Promise<unknown> {
 }
 
 async function fetchFileContent(repoFullName: string, path: string, branch: string, token: string): Promise<string> {
+  // Encode each path segment individually — encodeURIComponent on the full path turns "/" into "%2F" which 404s
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/')
   const res = await fetch(
-    `https://api.github.com/repos/${repoFullName}/contents/${encodeURIComponent(path)}?ref=${branch}`,
+    `https://api.github.com/repos/${repoFullName}/contents/${encodedPath}?ref=${branch}`,
     {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.v3.raw' },
     }
   )
-  if (!res.ok) return `[erro ao ler ${path}]`
+  if (!res.ok) {
+    console.warn(`[enrichment] Failed to read ${path}: HTTP ${res.status}`)
+    return `[erro ao ler ${path} — HTTP ${res.status}]`
+  }
   const text = await res.text()
   // Limit to 200 lines to not blow up context
   const lines = text.split('\n')
@@ -149,7 +154,13 @@ export async function runEnrichmentPipeline(
 
   for (const cf of configFiles.slice(0, 5)) {
     callbacks.onLog('read', `Lendo ${cf.path}...`)
-    configContents[cf.path] = await fetchFileContent(repoFullName, cf.path, branch, githubToken)
+    const content = await fetchFileContent(repoFullName, cf.path, branch, githubToken)
+    configContents[cf.path] = content
+    if (content.startsWith('[erro')) {
+      callbacks.onLog('warn', `Falha ao ler ${cf.path}`)
+    } else {
+      callbacks.onLog('read', `✓ ${cf.path} (${content.split('\n').length} linhas)`)
+    }
   }
 
   // ===== STEP 4: Find relevant files =====
@@ -182,7 +193,13 @@ export async function runEnrichmentPipeline(
 
   for (const rf of relevantFiles.slice(0, 8)) {
     callbacks.onLog('read', `Lendo ${rf.path}...`)
-    fileContents[rf.path] = await fetchFileContent(repoFullName, rf.path, branch, githubToken)
+    const content = await fetchFileContent(repoFullName, rf.path, branch, githubToken)
+    fileContents[rf.path] = content
+    if (content.startsWith('[erro')) {
+      callbacks.onLog('warn', `Falha ao ler ${rf.path}`)
+    } else {
+      callbacks.onLog('read', `✓ ${rf.path} (${content.split('\n').length} linhas)`)
+    }
   }
 
   // ===== STEP 6: Detect patterns =====

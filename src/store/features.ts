@@ -159,7 +159,7 @@ export const useFeaturesStore = create<FeaturesState>()(
             card.id === cardId
               ? {
                   ...card,
-                  enrichmentLogs: [...card.enrichmentLogs, { timestamp: new Date().toISOString(), step, detail }],
+                  enrichmentLogs: [...(card.enrichmentLogs || []), { timestamp: new Date().toISOString(), step, detail }],
                   enrichmentStep: step,
                 }
               : card
@@ -176,12 +176,36 @@ export const useFeaturesStore = create<FeaturesState>()(
       clearEnrichmentLogs: (cardId) =>
         set((state) => ({
           cards: state.cards.map((card) =>
-            card.id === cardId ? { ...card, enrichmentLogs: [], enrichmentStep: '' } : card
+            card.id === cardId ? { ...card, enrichmentLogs: [], enrichmentStep: '', enrichmentStatus: card.enrichmentStatus ?? 'idle', enrichmentError: card.enrichmentError ?? null } : card
           ),
         })),
 
       getCardsByColumn: (columnId) => get().cards.filter((card) => card.columnId === columnId),
     }),
-    { name: 'vibe-kanban-features' }
+    {
+      name: 'vibe-kanban-features',
+      // Migrate old cards that lack newer fields (enrichmentLogs, enrichmentStatus, etc.)
+      merge: (persisted, current) => {
+        const persistedState = persisted as Partial<FeaturesState> | undefined
+        if (!persistedState || !persistedState.cards) return current
+        return {
+          ...current,
+          ...persistedState,
+          cards: persistedState.cards.map((card) => ({
+            ...card,
+            enrichmentStatus: card.enrichmentStatus ?? 'idle',
+            enrichmentError: card.enrichmentError ?? null,
+            enrichmentLogs: card.enrichmentLogs ?? [],
+            enrichmentStep: card.enrichmentStep ?? '',
+            iterationCount: card.iterationCount ?? 0,
+            promptVersions: card.promptVersions ?? [],
+            codeOutputs: card.codeOutputs ?? [],
+            technicalReview: card.technicalReview ?? null,
+            promptAccuracy: card.promptAccuracy ?? null,
+            generalSelects: card.generalSelects ?? [],
+          })),
+        }
+      },
+    }
   )
 )

@@ -66,7 +66,7 @@ export function KanbanCard({ card, onClick }: KanbanCardProps) {
               {card.enrichmentStep || 'Iniciando...'}
             </span>
           </div>
-          {card.enrichmentLogs.length > 0 && (
+          {card.enrichmentLogs && card.enrichmentLogs.length > 0 && (
             <p className="text-xs font-mono text-purple-600 truncate pl-5">
               {card.enrichmentLogs[card.enrichmentLogs.length - 1]?.detail}
             </p>
